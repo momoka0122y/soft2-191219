@@ -24,6 +24,12 @@ typedef struct itemset
   Item *item;
 } Itemset;
 
+typedef struct answer
+{
+  double count_value;
+  char *flags;
+}Answer;
+
 // 関数のプロトサイプ宣言
 
 // Itemset *init_itemset(int, int);
@@ -70,7 +76,7 @@ void save_itemset(char *filename);
 // 返り値:
 //   最適時の価値の総和を返す
 //
-double solve(const Itemset *list, double capacity);
+Answer solve(const Itemset *list, double capacity);
 
 // double search()
 //
@@ -84,7 +90,7 @@ double solve(const Itemset *list, double capacity);
 //  途中までの価値と重さ (ポインタではない点に注意): sum_v, sum_w
 // 返り値:
 //   最適時の価値の総和を返す
-double search(int index, const Itemset *list, double capacity, int *flags, double sum_v, double sum_w);
+Answer search(int index, const Itemset *list, double capacity, int *flags, double sum_v, double sum_w);
 
 // エラー判定付きの読み込み関数
 int load_int(const char *argvalue);
@@ -152,15 +158,22 @@ int main (int argc, char**argv)
   print_itemset(items);
 
   // ソルバーで解く
-  double total = solve(items, W);
+  Answer kotae = solve(items, W);
+
 
   // 表示する
   printf("----\nbest solution:\n");
-  printf("value: %4.1f\n",total);
+  printf("value: %4.1f\n",kotae.count_value);
+  printf("answer:");
 
+  for (int i = 0 ; i < n ; i++){
+      printf("%d", kotae.flags[i]);
+    }
   free_itemset(items);
+  printf("\n");
   return 0;
 }
+
 
 // 構造体をポインタで確保するお作法を確認してみよう
 Itemset *init_itemset(int number, int seed)
@@ -172,7 +185,7 @@ Itemset *init_itemset(int number, int seed)
   srand(seed);
   for (int i = 0 ; i < number ; i++){
     item[i].value = 0.1 * (rand() % 200);
-    item[i].weight = 0.1 * (rand() % 200 + 1);
+    item[i].weight = 0.1 * (rand() % 200 + 1);//
   }
   *list = (Itemset){.number = number, .item = item};
   return list;
@@ -197,44 +210,59 @@ void print_itemset(const Itemset *list)
 }
 
 // ソルバーは search を index = 0 で呼び出すだけ
-double solve(const Itemset *list,  double capacity)
+Answer solve(const Itemset *list,  double capacity)
 {
   // 品物を入れたかどうかを記録するフラグ配列 => !!最大の組み合わせが返ってくる訳ではない!!
   int *flags = (int*)calloc(list->number, sizeof(int));
-  double max_value = search(0,list,capacity,flags, 0.0, 0.0);
+  Answer max_value = search(0,list,capacity,flags, 0.0, 0.0);
   free(flags);
   return max_value;
 }
 
 // 再帰的な探索関数
-double search(int index, const Itemset *list, double capacity, int *flags, double sum_v, double sum_w)
+Answer search(int index, const Itemset *list, double capacity, int *flags, double sum_v, double sum_w)
 {
   int max_index = list->number;
   assert(index >= 0 && sum_v >= 0 && sum_w >= 0);
   // 必ず再帰の停止条件を明記する (最初が望ましい)
   if (index == max_index){
     const char *format_ok = ", total_value = %5.1f, total_weight = %5.1f\n";
-    const char *format_ng = ", total_value = %5.1f, total_weight = %5.1f NG\n";
     for (int i = 0 ; i < max_index ; i++){
       printf("%d", flags[i]);
     }
     if (sum_w < capacity){
       printf(format_ok, sum_v, sum_w);
-      return sum_v;
-    } else{
-      printf(format_ng, sum_v, sum_w);
-      return 0;
+
+      char *flags_char= (char*)malloc(sizeof(char)*100);
+      for (int i = 0 ; i < max_index ; i++){
+        flags_char[i]=flags[i];
     }
+
+      return (Answer){ .count_value = sum_v, .flags=flags_char};
+    } 
   }
 
   // 以下は再帰の更新式: 現在のindex の品物を使う or 使わないで分岐し、index をインクリメントして再帰的にsearch() を実行する
   
   flags[index] = 0;
-  const double v0 = search(index+1, list, capacity, flags, sum_v, sum_w);
+  Answer v0= search(index+1, list, capacity, flags, sum_v, sum_w );
+  
 
   flags[index] = 1;
-  const double v1 = search(index+1, list, capacity, flags, sum_v + list->item[index].value, sum_w + list->item[index].weight);
 
+
+  Answer v1= (Answer){ .count_value = 0};
+
+  if (sum_w + list->item[index].weight<capacity){
+    v1= search(index+1, list, capacity, flags , sum_v + list->item[index].value, sum_w + list->item[index].weight);
+  }else{
+    v1= (Answer){ .count_value = 0};
+  }
   // 使った場合の結果と使わなかった場合の結果を比較して返す
-  return (v0 > v1) ? v0 : v1;
+if (v0.count_value < v1.count_value) {
+  free(v0.flags);
+}else{
+  free(v1.flags);
 }
+  return  (v0.count_value > v1.count_value) ? v0 : v1;
+}   
