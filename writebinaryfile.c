@@ -17,6 +17,9 @@ int main(int argc, char**argv)
   for(int i = 0 ; i < size ; i++)
     d[i] = 0.5423 * rand();
 
+
+
+
   //テキストに出力してみる
   FILE *fp;
   if ( (fp = fopen(argv[1],"w")) == NULL ){
@@ -28,6 +31,10 @@ int main(int argc, char**argv)
   for(int i = 0 ; i < size ; i++)
     fprintf(fp,"%f\n",d[i]);
   fclose(fp);
+
+
+
+
 
   // "wb"の'b'はwindows は必須, linux/mac はなくてもよい ("w" でOK)
   if ( (fp = fopen(argv[2],"wb")) == NULL ){

@@ -5,7 +5,6 @@
 #include <assert.h>
 #include <unistd.h>
 #include <errno.h> // strtol のエラー判定用
-#include <time.h>
 
 // 町の構造体（今回は2次元座標）を定義
 typedef struct
@@ -21,6 +20,12 @@ typedef struct
   int height;
   char **dot;
 } Map;
+
+typedef struct answer
+{
+  double count_distance;
+  int *route;
+}Answer;
 
 // 整数最大値をとる関数
 int max(const int a, const int b)
@@ -39,11 +44,14 @@ void draw_line(Map map, City a, City b);
 void draw_route(Map map, City *city, int n, const int *route);
 void plot_cities(FILE* fp, Map map, City *city, int n, const int *route);
 double distance(City a, City b);
-double solve(const City *city, int n, int *route);
-void yama(const City *city, int n, int *route, int *nowroute,double *min);
+Answer solve(const City *city, int n, int *route, int *visited);
 Map init_map(const int width, const int height);
 void free_map_dot(Map m);
-City *load_cities(const char* filename,int *n);
+City *load_cities(const char* filename,int *n,const int max_cities);
+Answer search(int index, const City *city, int n, int *route,double demo_distance, int *visited, int *flags, double sum_v);
+double sum_distance(int n, int *route,const City *city);
+
+
 
 Map init_map(const int width, const int height)
 {
@@ -59,7 +67,7 @@ void free_map_dot(Map m)
   free(m.dot);
 }
 
-City *load_cities(const char *filename, int *n)
+City *load_cities(const char *filename, int *n,const int max_cities)
 {
   City *city;
   FILE *fp;
@@ -68,6 +76,7 @@ City *load_cities(const char *filename, int *n)
     exit(1);
   }
   fread(n,sizeof(int),1,fp);
+  assert( *n <= max_cities ); 
   city = (City*)malloc(sizeof(City) * *n);
   for (int i = 0 ; i < *n ; i++){
     fread(&city[i].x, sizeof(int), 1, fp);
@@ -91,26 +100,30 @@ int main(int argc, char**argv)
     exit(1);
   }
   int n;
-  
 
-  City *city = load_cities(argv[1],&n);
-  assert( n > 1 && n <= max_cities); // さすがに都市数100は厳しいので
+  City *city = load_cities(argv[1],&n,max_cities);
+
   // 町の初期配置を表示
   plot_cities(fp, map, city, n, NULL);
+  sleep(1);
 
   // 訪れる順序を記録する配列を設定
   int *route = (int*)calloc(n, sizeof(int));
+  // 訪れた町を記録するフラグ
+  int *visited = (int*)calloc(n, sizeof(int));
 
-  const double d = solve(city,n,route);
-  plot_cities(fp, map, city, n, route);
+  Answer answer= solve(city,n,route,visited);//ここにsolveあるよおおおおおお
+  double d=answer.count_distance;
+  plot_cities(fp, map, city, n, answer.route);
   printf("total distance = %f\n", d);
   for (int i = 0 ; i < n ; i++){
-    printf("%d -> ", route[i]);
+    printf("%d -> ", answer.route[i]);
   }
   printf("0\n");
 
   // 動的確保した環境ではfreeをする
   free(route);
+  free(visited);
   free(city);
   
   return 0;
@@ -174,93 +187,85 @@ double distance(City a, City b)
   return sqrt(dx * dx + dy * dy);
 }
 
-double solve(const City *city, int n, int *best_route)
+Answer solve(const City *city, int n, int *route, int *visited)//nはcityの数
 {
-  best_route[0] = 0; // 循環した結果を避けるため、常に0番目からスタート
-  
-  int nowroute[n];
+  // 以下はとりあえずダミー。ここに探索プログラムを実装する
+  // 現状は町の番号順のルートを回っているだけ
+  // 実際は再帰的に探索して、組み合わせが膨大になる。
+  route[0] = 0; // 循環した結果を避けるため、常に0番目からスタート
+  visited[0] = 1;
+    for (int i = 1; i < n ; i++){
+    visited[i] = 0; // 訪問済みでないことを0で初期化
+  }
+  int *demo_route = (int*)calloc(n, sizeof(int));
+  demo_route[0] = 0; 
   for (int i = 0 ; i < n ; i++){
-    best_route[i] = i;
-    nowroute[i]=best_route[i];
-  }//数字を順番通りに回った時のroute
+    demo_route[i] = i; // 訪問済みかチェック
+  }
+  double demo_distance=sum_distance(n,demo_route,city);
+  free(demo_route);//枝切りの基準となるdemo_distanceを作る。これより長かったら切る。
 
+  int *flags = (int*)calloc(n, sizeof(int));
+
+  Answer shortest = search(1, city,  n, route,demo_distance, visited, flags, 0.0);
+  
+  free(flags);
+  return shortest;
+
+  
+}
+
+double sum_distance(int n, int *route,const City *city){
+  // トータルの巡回距離を計算する
+  // 実際には再帰の末尾で計算することになる
   double sum_d = 0;
   for (int i = 0 ; i < n ; i++){
-    const int c0 = best_route[i];
-    const int c1 = best_route[(i+1)%n]; // i=0の時はc1は0になる。
+     int c0 = route[i];
+     int c1 = route[(i+1)%n]; // nは0に戻る
     sum_d += distance(city[c0],city[c1]);
-  }//ここで数字の順番通りに回った場合の距離を出して、それをbest_distanceの初期値にしている。
-  double best_distance=sum_d;
-  srand((unsigned int)time(NULL));//乱数のseedを作成
-
-
-  for(int k=0;k<10*n;k++){//山登りを（狭義）30*n回する
-      for(int shufle=0;shufle<3*n;shufle++){
-          int a=rand()%(n-1)+1;//1~(n-1)までの数
-          int b=rand()%(n-1)+1;//1~(n-1)までの数
-          int x=nowroute[a];
-          nowroute[a]=nowroute[b];
-          nowroute[b]=x;//0以外の二つの数を交換
-      }//nowrouteをシャッフルする
-      int good_route[n];
-      for(int i=0;i<n;i++){
-        good_route[i]=nowroute[i];
-      }
-      double sumd = 0;
-      for (int i = 0 ; i < n ; i++){
-          const int c0 = good_route[i];
-          const int c1 = good_route[(i+1)%n]; //i=0の時はc1は0になる。
-          sumd += distance(city[c0],city[c1]);
-      }
-      yama(city,n,good_route,nowroute,&sumd);
-      if(sumd<best_distance){
-          best_distance = sumd;
-          for(int i=0;i<n;i++){
-            best_route[i]=good_route[i];
-          }
-      }
   }
-  return best_distance;
+  return sum_d;
 }
 
-void yama(const City *city, int n, int *good_route, int *nowroute,double *min){
-  short flag=0;//一回のステップの中で改善策が見つかったかどうか。
-  for(int i=1;i<n-1;i++){
-      for(int j=i+1;j<n;j++){//0以外の町から二つ町を交換させ、それで改善されたらgood_routeとする。
-          double newdis=0;
-          int tmp_route[n];
-          for (int make_tmp_route=0;make_tmp_route<n;make_tmp_route++){
-            tmp_route[make_tmp_route]=nowroute[make_tmp_route];
-          }
-          tmp_route[j]=nowroute[i];
-          tmp_route[i]=nowroute[j];//nowrouteからi番目とj番目を交換したtmp_routeを作る。
-          for (int k = 0 ; k < n ; k++){
-            const int c0 = tmp_route[k];
-            const int c1 = tmp_route[(k+1)%n]; 
-            newdis += distance(city[c0],city[c1]);
-          }//新しい距離を計算
-          if(newdis<*min){
-              flag=1;
-              *min=newdis;
-              for(int k=0;k<n;k++){
-                  good_route[k]=tmp_route[k];
-              }
-          }//もし新しいルートが前回より短かったらgood_routeをそれに変える。　変更したってわかるようにflag=1にしとく
-      }
-  }
-  
-  if(flag!=0){
-    for(int i=0;i<n;i++){
-      nowroute[i]=good_route[i];
+Answer  search(int index, const City *city, int n, int *route, double demo_distance ,int *visited, int *flags, double sum_d)
+{ 
+  int max_index = n;
+  assert(index >= 0 && sum_d >= 0);
+  // 必ず再帰の停止条件を明記する (最初が望ましい)
+  if (index == max_index){
+    const char *format_ok = ", total_value = %5.1f\n";
+    for (int i = 0 ; i < max_index ; i++){
+      printf("%d", route[i]);
     }
-    yama(city,n,good_route,nowroute,min);
-  }//もし上のfor文の中で変更があった場合、こっからさらに最適経路を探せる場合があるので最適経路を探せる場合があるので
-  else {
-    printf("%f ",*min);
-    for(int i=0;i<n;i++){nowroute[i]=good_route[i];
-      printf("%d ",good_route[i]);
+
+      printf(format_ok, sum_d);
+
+      char *flags_char= (char*)malloc(sizeof(char)*100);
+      for (int i = 0 ; i < max_index ; i++){
+        flags_char[i]=route[i];
     }
-    printf("\n");
+
+      return (Answer){ .count_distance = sum_d + distance(city[route[max_index]],city[route[0]]), .route=route};
     
   }
-}
+
+  // 以下は再帰の更新式: 現在のindex の品物を使う or 使わないで分岐し、index をインクリメントして再帰的にsearch() を実行する
+  
+  Answer tmp= (Answer){ .count_distance = demo_distance*2};
+  
+
+  for (int i =1; i<n; i++){
+    if (visited[i]==0){
+      route[index] = i;
+      visited[i]=1;
+      Answer rrr=search(index+1, city,  n, route,demo_distance, visited, flags, sum_d + distance(city[route[index-1]],city[route[index]]));
+      
+      if(rrr.count_distance<tmp.count_distance){
+        tmp=rrr;
+      }
+      visited[i]=0;
+    }
+    
+  }
+  return  tmp;
+}   
